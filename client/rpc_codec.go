@@ -168,6 +168,7 @@ func newRpcCodec(req *transport.Message, client transport.Client, c codec.NewCod
 	return r
 }
 
+// 真正进行通讯的Write方法
 func (c *rpcCodec) Write(m *codec.Message, body interface{}) error {
 	c.buf.wbuf.Reset()
 
@@ -206,6 +207,7 @@ func (c *rpcCodec) Write(m *codec.Message, body interface{}) error {
 	}
 
 	// send the request
+	// 真正发送远程通讯请求
 	if err := c.client.Send(&msg); err != nil {
 		return errors.InternalServerError("go.micro.client.transport", err.Error())
 	}
@@ -217,6 +219,7 @@ func (c *rpcCodec) ReadHeader(m *codec.Message, r codec.MessageType) error {
 	var tm transport.Message
 
 	// read message from transport
+	// 真正读取请求相应的数据
 	if err := c.client.Recv(&tm); err != nil {
 		return errors.InternalServerError("go.micro.client.transport", err.Error())
 	}

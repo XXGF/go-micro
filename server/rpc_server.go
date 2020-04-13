@@ -513,6 +513,17 @@ func (s *rpcServer) Subscribe(sb Subscriber) error {
 	return nil
 }
 
+// 在该方法中，会获取服务所在机器的 IP、端口以及服务名称、节点ID、元数据、处理器列表、订阅者等信息并将其注册到系统默认的注册中心
+// 这里我们通过系统环境变量 MICRO_REGISTRY=consul 指定默认注册中心为 Consul，
+// 所以我们直接去 go-micro/registry/consul/consul.go 中看 (c *consulRegistry) Register 方法的实现
+
+// go-micro v2版本已经取消consul作为默认的注册中心了，所以在这里没有找到consul的代码
+// 具体consul的注册逻辑是：
+// 系统会发起一个 PUT 请求到 Consul 的服务注册接口 /v1/agent/service/register，并将服务注册信息作为请求实体传递过去，
+// 请求失败则返回错误信息，请求成功，则可以在 Consul 上看到注册的新服务。
+
+// ** 思考:如何替换掉默认的注册中心？
+
 func (s *rpcServer) Register() error {
 
 	s.RLock()

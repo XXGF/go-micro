@@ -63,6 +63,7 @@ func (r *rpcClient) newCodec(contentType string) (codec.NewCodec, error) {
 	return nil, fmt.Errorf("Unsupported Content-Type: %s", contentType)
 }
 
+// 这里是真正的远程调用实现
 func (r *rpcClient) call(ctx context.Context, node *registry.Node, req Request, resp interface{}, opts CallOptions) error {
 	address := node.Address
 
@@ -109,6 +110,8 @@ func (r *rpcClient) call(ctx context.Context, node *registry.Node, req Request, 
 		dOpts = append(dOpts, transport.WithTimeout(opts.DialTimeout))
 	}
 
+	// 这个 c 是Connection，里面封装了TransportClient，TransportClient里面封装了Socket，Socket的实现有多中，包括httpTransportSocket【http实现】 、grpcTransportSocket【rpc实现】等
+	// 最终真正进行通讯的是Socket的实现
 	c, err := r.pool.Get(address, dOpts...)
 	if err != nil {
 		return errors.InternalServerError("go.micro.client", "connection error: %v", err)
@@ -147,16 +150,47 @@ func (r *rpcClient) call(ctx context.Context, node *registry.Node, req Request, 
 		}()
 
 		// send request
+		// 这里才是真正发起请求
 		if err := stream.Send(req.Body()); err != nil {
 			ch <- err
 			return
 		}
 
 		// recv request
+		// 这里是接收响应信息
 		if err := stream.Recv(resp); err != nil {
 			ch <- err
 			return
 		}
+
+		// **思考：go-micro是只能同步发送和接收，不能像grpc那样异步发送和接收？
+		/*
+		go func() {
+		        for {
+			    select {
+				case <-ctx.Done():
+				        log.Println("close...")
+					return
+				default:
+					log.Println("send...")
+					stream.Send(&steam.Request{
+						Msg: time.Now().String(),
+					})
+				}
+			}
+		}()
+
+		go func() {
+			for {
+				req, err := stream.Recv()
+				if err != nil {
+		                         stream.Close()
+					log.Println("err:", err)
+		                         cancel()
+				}
+				log.Println("recv:", req.Data)
+			}
+		}()*/
 
 		// success
 		ch <- nil
@@ -387,6 +421,23 @@ func (r *rpcClient) next(request Request, opts CallOptions) (selector.Next, erro
 	return next, nil
 }
 
+// 这里的Call方法，是在*.proto协议文件生成的 *.micro.go文件里被调用的，例如：
+/*
+func (c *cmemberService) ListByCid(ctx context.Context, in *ListByCidReq, opts ...client.CallOption) (*ListByCidResp, error) {
+	// 通过 NewRequest 初始化了请求实例，包含服务名称及请求端点、参数信息
+	req := c.c.NewRequest(c.name, "Cmember.ListByCid", in)
+
+    // 初始化了响应实例
+	out := new(ListByCidResp)
+
+    // 下来是调用 Client 的 Call 函数，所有请求调用处理的核心逻辑（服务发现、节点选择、请求处理、超时、重试、编码）都在这个函数里
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+*/
 func (r *rpcClient) Call(ctx context.Context, request Request, response interface{}, opts ...CallOption) error {
 	// make a copy of call opts
 	callOpts := r.opts.CallOptions
@@ -394,6 +445,12 @@ func (r *rpcClient) Call(ctx context.Context, request Request, response interfac
 		opt(&callOpts)
 	}
 
+	// 1.首先会通过 rpcClient 类的 next 方法获取远程服务节点，在未设置系统环境变量 MICRO_PROXY_ADDRESS 的情况下会执行 Selector 的 Select 方法获取服务节点
+	//   默认的 Selector 初始化操作位于 ~/go/hello/src/github.com/micro/go-micro/client/options.go 的 newOptions 方法（该方法会在 client.go 的初始化操作中调用）
+	//   Selector 依赖于 Registry 组件，如果没有额外设置的话，基于系统默认的 Registry 实现
+	//   Selector 默认的负载均衡策略使用的是随机算法，并且会在本地对节点选择结果进行缓存。
+
+	//这里调用 rpcClient 的 next 函数返回的并不是真正的节点而是一个匿名函数
 	next, err := r.next(request, callOpts)
 	if err != nil {
 		return err
@@ -442,6 +499,7 @@ func (r *rpcClient) Call(ctx context.Context, request Request, response interfac
 		}
 
 		// select next node
+		// 1.这里是调用上面返回的匿名函数，取得真正的服务节点信息
 		node, err := next()
 		service := request.Service()
 		if err != nil {
@@ -452,8 +510,11 @@ func (r *rpcClient) Call(ctx context.Context, request Request, response interfac
 		}
 
 		// make the call
+		// 2.如果返回节点成功则调用 rcall 函数（即 rpcClient 的 call 函数）发起远程网络请求（通过协程实现）
 		err = rcall(ctx, node, request, response, callOpts)
+		// 3.然后对服务调用成功与否通过 Selector 的 Mark 函数进行标记（以便后续对服务进行监控和治理）
 		r.opts.Selector.Mark(service, node, err)
+		// 4.最后在 Call 函数中，也是通过协程发起对上述 call 匿名函数的调用
 		return err
 	}
 
@@ -470,6 +531,7 @@ func (r *rpcClient) Call(ctx context.Context, request Request, response interfac
 
 	for i := 0; i <= retries; i++ {
 		go func(i int) {
+			// 真正进行调用
 			ch <- call(i)
 		}(i)
 

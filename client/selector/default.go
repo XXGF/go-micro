@@ -49,6 +49,11 @@ func (c *registrySelector) Select(service string, opts ...SelectOption) (Next, e
 	// get the service
 	// try the cache first
 	// if that fails go directly to the registry
+
+	// 通过 c.rc.GetService(service) 传入指定服务名称，再通过默认 Registry 实现 Consul 获取对应的服务实例列表并缓存
+	// 如果已缓存则直接返回提高性能，
+	// 在通过 Registry 获取服务节点列表时还会单独跑一个协程去监听服务注册，如果有新节点注册进来，则加到缓存中，如果有节点故障则删除缓存中的节点信息，
+	// 具体源码位于 ~/go/hello/src/github.com/micro/go-micro/registry/cache/rcache.go
 	services, err := c.rc.GetService(service)
 	if err != nil {
 		if err == registry.ErrNotFound {
@@ -67,6 +72,8 @@ func (c *registrySelector) Select(service string, opts ...SelectOption) (Next, e
 		return nil, ErrNoneAvailable
 	}
 
+	// 通过默认负载均衡实现（这里是random算法）返回指定节点
+	// 获取到远程服务实例节点后，就可以发起远程服务请求了
 	return sopts.Strategy(services), nil
 }
 

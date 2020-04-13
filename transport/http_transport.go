@@ -105,6 +105,7 @@ func (h *httpTransportClient) Send(m *Message) error {
 	h.Lock()
 	h.bl = append(h.bl, req)
 	select {
+	// 缓存请求体
 	case h.r <- h.bl[0]:
 		h.bl = h.bl[1:]
 	default:
@@ -112,10 +113,14 @@ func (h *httpTransportClient) Send(m *Message) error {
 	h.Unlock()
 
 	// set timeout if its greater than 0
+	// 设置超时
 	if h.ht.opts.Timeout > time.Duration(0) {
 		h.conn.SetDeadline(time.Now().Add(h.ht.opts.Timeout))
 	}
 
+	// 最终执行远程请求通讯的方法
+	// 至此，远程调用请求的发送逻辑完成
+	// 本质上，应该还是发http请求
 	return req.Write(h.conn)
 }
 
@@ -138,6 +143,7 @@ func (h *httpTransportClient) Recv(m *Message) error {
 		h.conn.SetDeadline(time.Now().Add(h.ht.opts.Timeout))
 	}
 
+	// 最开始的读取请求相应的数据
 	rsp, err := http.ReadResponse(h.buff, r)
 	if err != nil {
 		return err
