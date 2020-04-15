@@ -23,6 +23,7 @@ const (
 )
 
 // API handler is the default handler which takes api.Request and returns api.Response
+// 这个是Micro-API的HTTP服务器对应 http请求 进行处理的逻辑
 func (a *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	bsize := handler.DefaultMaxRecvSize
 	if a.opts.MaxRecvSize > 0 {
@@ -30,6 +31,7 @@ func (a *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, bsize)
+	// 转成 *api.Request
 	request, err := requestToProto(r)
 	if err != nil {
 		er := errors.InternalServerError("go.micro.api", err.Error())
@@ -74,6 +76,7 @@ func (a *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// create strategy
 	so := selector.WithStrategy(strategy(service.Services))
 
+	// 调用后端服务器
 	if err := c.Call(cx, req, rsp, client.WithSelectOption(so)); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		ce := errors.Parse(err.Error())

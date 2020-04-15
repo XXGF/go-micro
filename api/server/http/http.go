@@ -23,6 +23,7 @@ type httpServer struct {
 	exit    chan chan error
 }
 
+// 创建 Micro-API的HTTP服务器
 func NewServer(address string, opts ...server.Option) server.Server {
 	var options server.Options
 	for _, o := range opts {
@@ -65,6 +66,7 @@ func (s *httpServer) Handle(path string, handler http.Handler) {
 	s.mux.Handle(path, h)
 }
 
+// 启动Micro-API的HTTP服务器
 func (s *httpServer) Start() error {
 	var l net.Listener
 	var err error
