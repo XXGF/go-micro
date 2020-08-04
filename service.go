@@ -95,6 +95,12 @@ func (s *service) Init(opts ...Option) {
 		// Initialise the command flags, overriding new service
 		if err := s.opts.Cmd.Init(
 			cmd.Auth(&s.opts.Auth),
+			// Broker 组件会和 Registry、Transport、Client、Server 一起从系统环境变量/命令行参数读取配置来覆盖默认的 Broker 实现实例
+			// 相应的实现逻辑和之前介绍的 Registry 和 Transport 一样，只不过对应的系统环境变量名是 MICRO_BROKER，参数选项名是 --broker
+			// 关于其具体实现可以在 src/github.com/micro/go-micro/config/cmd/cmd.go
+
+			// 比如我们在系统环境变量中设置 MICRO_BROKER=nats，或者在启动 UserService 的时候执行的命令是 go run main.go --broker=nats，
+			// 则对应的 Broker 实例则变成 nats.NewBroker 返回的 natsBroker 实例并覆盖默认的 httpBroker 实现
 			cmd.Broker(&s.opts.Broker),
 			cmd.Registry(&s.opts.Registry),
 			cmd.Transport(&s.opts.Transport),

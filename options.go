@@ -46,6 +46,8 @@ type Options struct {
 func newOptions(opts ...Option) Options {
 	opt := Options{
 		Auth:      auth.DefaultAuth,
+		// 被通过 Options 类封装起来设置到 Service 的 opts 属性上，以便后续调用。
+		// 这里的 broker.DefaultBroker 即 src/github.com/micro/go-micro/broker/broker.go 中通过如下这行代码返回的 httpBroker 实例
 		Broker:    broker.DefaultBroker,
 		Cmd:       cmd.DefaultCmd,
 		Config:    config.DefaultConfig,

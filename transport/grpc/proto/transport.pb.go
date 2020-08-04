@@ -141,7 +141,7 @@ type transportStreamClient struct {
 }
 
 func (x *transportStreamClient) Send(m *Message) error {
-	return x.ClientStream.SendMsg(m)
+	return x.CltStream.SendMsg(m)
 }
 
 func (x *transportStreamClient) Recv() (*Message, error) {

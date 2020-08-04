@@ -107,6 +107,7 @@ func newTransport(config *tls.Config) *http.Transport {
 	return t
 }
 
+// 这里返回的 httpBroker 就是实现了 Broker 接口的 HTTP Broker 实现类
 func newHttpBroker(opts ...Option) Broker {
 	options := Options{
 		Codec:    json.Marshaler{},
