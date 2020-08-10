@@ -822,6 +822,10 @@ func (s *rpcServer) Start() error {
 	bname := config.Broker.String()
 
 	// connect to the broker
+	// 启动Broker监听请求
+	// Connect() 方法实现位于 httpBroker 中，
+	// 主要是启动 HTTP 服务并初始化 httpBroker.r 属性，
+	// 即通过缓存封装的默认 Registry 组件实现实例，以便后续查询指定 topic 对应服务。
 	if err := config.Broker.Connect(); err != nil {
 		if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
 			log.Errorf("Broker [%s] connect error: %v", bname, err)

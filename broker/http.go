@@ -31,21 +31,27 @@ import (
 // HTTP Broker is a point to point async broker
 type httpBroker struct {
 	id      string
+	// IP和端口号
 	address string
 	opts    Options
 
 	mux *http.ServeMux
 
+	// 发Http Post请求，进行消息的Publish
 	c *http.Client
 	r registry.Registry
 
 	sync.RWMutex
+	// httpSubscriber里封装了topic和对订阅的消息进行处理的函数
+	// key是topic
 	subscribers map[string][]*httpSubscriber
 	running     bool
 	exit        chan chan error
 
 	// offline message inbox
 	mtx   sync.RWMutex
+	// 存放需要进行Publish的消息
+	// key是topic
 	inbox map[string][][]byte
 }
 
@@ -268,7 +274,7 @@ func (h *httpBroker) run(l net.Listener) {
 	for {
 		select {
 		// heartbeat for each subscriber
-		case <-t.C:
+		case <-t.C:pub
 			h.RLock()
 			for _, subs := range h.subscribers {
 				for _, sub := range subs {
@@ -291,6 +297,11 @@ func (h *httpBroker) run(l net.Listener) {
 	}
 }
 
+// 处理订阅的Topic推送消息的HTTP请求
+// 该方法只接受 POST 请求，
+// 对于读取到的异步消息会通过 httpBroker 实现的解码器进行解码后，
+// 从 h.subscribers[topic] 中获取所有的 httpSubscriber 实例，
+// 并调用其中的 fn 属性指向的处理器方法对消息进行处理
 func (h *httpBroker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if req.Method != "POST" {
 		err := merr.BadRequest("go.micro.broker", "Method not allowed")
@@ -309,6 +320,7 @@ func (h *httpBroker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// 消息解码
 	var m *Message
 	if err = h.opts.Codec.Unmarshal(b, &m); err != nil {
 		errr := merr.InternalServerError("go.micro.broker", "Error parsing request body: %v", err)
@@ -317,6 +329,7 @@ func (h *httpBroker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// 取出主题
 	topic := m.Header["Micro-Topic"]
 	//delete(m.Header, ":topic")
 
@@ -334,6 +347,7 @@ func (h *httpBroker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	var subs []Handler
 
 	h.RLock()
+	// 取出订阅消息处理函数，这个进行处理
 	for _, subscriber := range h.subscribers[topic] {
 		if id != subscriber.id {
 			continue
@@ -343,6 +357,7 @@ func (h *httpBroker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	h.RUnlock()
 
 	// execute the handler
+	// 取出订阅消息处理函数，这个进行处理
 	for _, fn := range subs {
 		p.err = fn(p)
 	}
@@ -530,10 +545,17 @@ func (h *httpBroker) Publish(topic string, msg *Message, opts ...PublishOption) 
 	}
 
 	// save the message
+	// 1.对消息进行编码并保存到 httpBroker 的 inbox 中，
+	// inbox 是一个字典结构，以 topic 作为键，以消息数组作为值，
+	// 新增的消息都会追加到这个数组上。
 	h.saveMessage(topic, b)
 
 	// now attempt to get the service
 	h.RLock()
+	// 2.从Registry获取部署topic服务的节点信息，
+	// 我们前面提到 h.r 是通过 cache.New 返回的封装了默认 Registry 实现的 cache 类实例，
+	// 这里的 h.r 类似我们前介绍 Selector 组件时提到的 registrySelector.rc 属性，
+	// 对应的 GetService 方法定义在 src/github.com/micro/go-micro/registry/cache/rcache.go 中
 	s, err := h.r.GetService(serviceName)
 	if err != nil {
 		h.RUnlock()
@@ -552,7 +574,9 @@ func (h *httpBroker) Publish(topic string, msg *Message, opts ...PublishOption) 
 		vals := url.Values{}
 		vals.Add("id", node.Id)
 
+		// 请求uri
 		uri := fmt.Sprintf("%s://%s%s?%s", scheme, node.Address, DefaultPath, vals.Encode())
+		// 发post请求
 		r, err := h.c.Post(uri, "application/json", bytes.NewReader(b))
 		if err != nil {
 			return err
@@ -620,12 +644,15 @@ func (h *httpBroker) Publish(topic string, msg *Message, opts ...PublishOption) 
 	// do the rest async
 	go func() {
 		// get a third of the backlog
+		// 从inbox中获取所有消息
 		messages := h.getMessage(topic, 8)
 		delay := (len(messages) > 1)
 
 		// publish all the messages
 		for _, msg := range messages {
 			// serialize here
+			// 调用srv方法将每条消息推送到服务节点去处理
+			// 所以，如果发布事件方未主动再次触发 Publish 方法，则堆积在 inbox 中的消息不会被订阅方拉取消费。
 			srv(s, msg)
 
 			// sending a backlog of messages
@@ -644,6 +671,7 @@ func (h *httpBroker) Subscribe(topic string, handler Handler, opts ...SubscribeO
 	options := NewSubscribeOptions(opts...)
 
 	// parse address for host, port
+	// 这里解析出IP和端口号，通过IP和端口号来识别订阅了topic的进程
 	host, port, err = net.SplitHostPort(h.Address())
 	if err != nil {
 		return nil, err
@@ -684,6 +712,8 @@ func (h *httpBroker) Subscribe(topic string, handler Handler, opts ...SubscribeO
 	}
 
 	// generate subscriber
+	// 首先，将启动的HTTP消息系统服务节点信息封装后设置到httpSubscriber实例中
+	// 包含了订阅主题、传入 Subscribe 方法的事件处理器、当前的 httpBroker 实例等信息
 	subscriber := &httpSubscriber{
 		opts:  options,
 		hb:    h,
@@ -694,6 +724,8 @@ func (h *httpBroker) Subscribe(topic string, handler Handler, opts ...SubscribeO
 	}
 
 	// subscribe now
+	// 该方法会调用 h.r.Register 注册 "topic:" + topic 对应的 HTTP 消息系统服务节点信息，
+	// 并将传入的 httpSubscriber 实例追加到 h.subscribers[s.topic] 数组中。
 	if err := h.subscribe(subscriber); err != nil {
 		return nil, err
 	}
